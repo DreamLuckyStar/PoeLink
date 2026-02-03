@@ -1,3 +1,7 @@
+import { createLogger } from '../../../utils/logger';
+
+const logEntity = createLogger('entity');
+
 /**
  * 前端实体抽取服务
  * 因后端无法连接外网，实体抽取在前端完成，调用 LLM API（需用户配置 API Key）
@@ -155,7 +159,7 @@ export async function extractEntities(
       };
       return result;
     } catch (err) {
-      console.warn('[EntityService] LLM 调用失败，使用本地抽取:', err);
+      logEntity.warn('LLM 调用失败，使用本地抽取', err);
     }
   }
 

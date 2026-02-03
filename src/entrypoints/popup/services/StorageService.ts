@@ -1,4 +1,7 @@
 // StorageService.ts
+import { createLogger } from '../../../utils/logger';
+
+const logStorage = createLogger('storage');
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -37,7 +40,7 @@ class StorageService {
     try {
       await browser.storage.local.set({ poelink_config: config });
     } catch (error) {
-      console.error('保存配置失败:', error);
+      logStorage.error('保存配置失败', error);
       throw error;
     }
   }
@@ -50,7 +53,7 @@ class StorageService {
       const result = await browser.storage.local.get(['poelink_config']);
       return (result.poelink_config as Config) || null;
     } catch (error) {
-      console.error('获取配置失败:', error);
+      logStorage.error('获取配置失败', error);
       return null;
     }
   }
@@ -62,7 +65,7 @@ class StorageService {
     try {
       await browser.storage.local.set({ poelink_messages: messages });
     } catch (error) {
-      console.error('保存消息失败:', error);
+      logStorage.error('保存消息失败', error);
       throw error;
     }
   }
@@ -75,7 +78,7 @@ class StorageService {
       const result = await browser.storage.local.get(['poelink_messages']);
       return (result.poelink_messages as Message[]) || null;
     } catch (error) {
-      console.error('获取消息失败:', error);
+      logStorage.error('获取消息失败', error);
       return null;
     }
   }
@@ -95,7 +98,7 @@ class StorageService {
     try {
       await browser.storage.local.remove(['poelink_config', 'poelink_messages']);
     } catch (error) {
-      console.error('清除存储失败:', error);
+      logStorage.error('清除存储失败', error);
       throw error;
     }
   }
@@ -107,7 +110,7 @@ class StorageService {
     try {
       return await browser.storage.local.getKeys();
     } catch (error) {
-      console.error('获取存储键失败:', error);
+      logStorage.error('获取存储键失败', error);
       return [];
     }
   }
@@ -120,7 +123,7 @@ class StorageService {
       const result = await browser.storage.local.get([key]);
       return key in result;
     } catch (error) {
-      console.error('检查存储键失败:', error);
+      logStorage.error('检查存储键失败', error);
       return false;
     }
   }

@@ -3,6 +3,9 @@ import communicationService from './services/CommunicationService';
 import storageService from './services/StorageService';
 import { recognizeIntent } from './services/IntentService';
 import { extractEntities } from './services/EntityService';
+import { createLogger, safeJsonStringify } from '../../utils/logger';
+
+const log = createLogger('popup');
 
 interface AppProps {
   onClose?: () => void;
@@ -72,7 +75,7 @@ interface AppConfig {
 type ConfigSection = Exclude<keyof AppConfig, 'configId' | 'llm'>;
 
 const defaultConfig: AppConfig = {
-  server: { protocol: 'HTTP', host: 'localhost', port: '7406' },
+  server: { protocol: 'HTTP', host: '', port: '' },
   database: { address: '', user: '', pass: '' },
   ops: { ip: '', port: '' },
   llm: { apiKey: '', provider: 'moonshot' },
@@ -232,7 +235,7 @@ const MessageBubble = ({ msg, index }: { msg: Message; index: number }) => {
           <details className="mt-4 rounded-xl border border-base-300 bg-base-100/80 p-3 shadow-sm">
             <summary className="cursor-pointer text-xs font-semibold text-base-content/80">原始执行流水</summary>
             <pre className="mt-2 max-h-64 overflow-y-auto text-[11px] text-base-content/70 whitespace-pre-wrap break-words">
-              {String(JSON.stringify(rawThirdMsg, null, 2))}
+              {safeJsonStringify(rawThirdMsg, { depth: 12 })}
             </pre>
           </details>
         )}
@@ -304,6 +307,9 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
   const [config, setConfig] = useState<AppConfig>(() => defaultConfig);
   const [currentStep, setCurrentStep] = useState(1);
   const [isConfigured, setIsConfigured] = useState(false);
+  const [isConfigSaved, setIsConfigSaved] = useState(false);
+  const [saveNotice, setSaveNotice] = useState('');
+  const [configEntry, setConfigEntry] = useState<'welcome' | 'chat'>('welcome');
 
   const [serverTestStatus, setServerTestStatus] = useState('');
   const [dbTestStatus, setDbTestStatus] = useState('');
@@ -318,6 +324,17 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isConfigView = view === 'config';
+    const width = Math.min(window.innerWidth * 0.95, isConfigView ? 920 : 720);
+    const height = Math.min(window.innerHeight * 0.9, isConfigView ? 640 : 420);
+    window.postMessage(
+      { source: 'POELink', type: 'SET_UI_SIZE', width, height },
+      '*'
+    );
+  }, [view]);
+
   // 加载配置和历史消息
   useEffect(() => {
     let mounted = true;
@@ -330,8 +347,12 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
           ...savedConfig,
           llm: savedConfig.llm ?? defaultConfig.llm
         });
+        const hasServer = !!(savedConfig.server?.host?.trim() && savedConfig.server?.port?.trim());
         setIsConfigured(true);
-        setView('chat');
+        setIsConfigSaved(true);
+        if (hasServer) {
+          setView('chat');
+        }
       }
 
       const savedMessages = await storageService.getMessages();
@@ -348,6 +369,21 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
   const hasServerConfig = useCallback(() => {
     return !!(config.server?.host?.trim() && config.server?.port?.trim());
   }, [config.server]);
+
+  const isStepComplete = useCallback((step: number) => {
+    switch (step) {
+      case 1:
+        return !!(config.server?.host?.trim() && config.server?.port?.trim());
+      case 2:
+        return !!(config.database?.address?.trim() && config.database?.user?.trim() && config.database?.pass?.trim());
+      case 3:
+        return !!(config.ops?.ip?.trim() && String(config.ops?.port ?? '').trim());
+      case 4:
+        return true;
+      default:
+        return false;
+    }
+  }, [config.server, config.database, config.ops]);
 
   const notifyUser = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const runtimeBrowser = (globalThis as any).browser ?? (globalThis as any).chrome;
@@ -366,7 +402,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     try {
       await storageService.setMessages(msgs);
     } catch (err) {
-      console.warn('保存消息失败', err);
+      log.warn('保存消息失败', err);
     }
   }, []);
 
@@ -375,7 +411,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     try {
       await storageService.setMessages([]);
     } catch (err) {
-      console.warn('清除聊天记录失败', err);
+      log.warn('清除聊天记录失败', err);
     }
   }, []);
 
@@ -384,10 +420,11 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     if (!hasServerConfig()) {
       const tipMsg: Message = {
         role: 'assistant',
-        content: '当前未完成配置，请先进入设置页面填写服务器信息后再试。',
+        content: '当前未完成配置，AMR 排查暂不可用。请先进入配置中心填写服务器信息。',
       };
       setMessages([...messages, tipMsg]);
       saveMessages([...messages, tipMsg]);
+      setView('config');
       return;
     }
 
@@ -492,7 +529,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         });
       }, (content.length / STREAM_CHUNK_SIZE) * STREAM_INTERVAL_MS + 100);
     } catch (err: any) {
-      console.error('API 调用失败', err);
+      log.error('API 调用失败', err);
       const errMsg: Message = {
         role: 'assistant',
         content: `抱歉，请求失败。${getFriendlyErrorMessage(err)}`,
@@ -516,6 +553,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         [field]: value,
       },
     }));
+    setIsConfigSaved(false);
   }, []);
 
   const updateLlmConfig = useCallback((field: keyof LLMConfig, value: string) => {
@@ -526,6 +564,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         [field]: value,
       },
     }));
+    setIsConfigSaved(false);
   }, []);
 
   const testServer = useCallback(async () => {
@@ -533,12 +572,6 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     try {
       const ok = await communicationService.healthCheck(config.server);
       setServerTestStatus(ok.success ? '连接成功' : `失败：${ok.error || '未知'}`);
-      if (ok?.success) {
-        await storageService.setConfig({
-          ...config,
-          llm: config.llm ?? { apiKey: '', provider: 'moonshot' }
-        });
-      }
     } catch (e: any) {
       setServerTestStatus(`异常：${getFriendlyErrorMessage(e)}`);
     }
@@ -554,12 +587,6 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         body: JSON.stringify(config.database)
       });
       setDbTestStatus(res.success ? '连接成功' : `失败: ${res.message || '未知错误'}`);
-      if (res?.success) {
-        await storageService.setConfig({
-          ...config,
-          llm: config.llm ?? { apiKey: '', provider: 'moonshot' }
-        });
-      }
     } catch (e: any) {
       setDbTestStatus(`异常：${getFriendlyErrorMessage(e)}`);
     }
@@ -574,18 +601,12 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         body: JSON.stringify(config.ops)
       });
       setOpsTestStatus(res.success ? '连接成功' : `失败: ${res.message || '未知错误'}`);
-      if (res?.success) {
-        await storageService.setConfig({
-          ...config,
-          llm: config.llm ?? { apiKey: '', provider: 'moonshot' }
-        });
-      }
     } catch (e: any) {
       setOpsTestStatus(`异常：${getFriendlyErrorMessage(e)}`);
     }
   }, [config.ops]);
 
-  const saveAndGoChat = useCallback(async () => {
+  const saveConfig = useCallback(async () => {
     let configId: string | undefined;
     try {
       const validateResp = await communicationService.validateConfig(config);
@@ -601,8 +622,13 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     await storageService.setConfig(nextConfig);
     setConfig(nextConfig);
     setIsConfigured(true);
-    setView('chat');
+    setIsConfigSaved(true);
   }, [config]);
+
+  const saveAndGoChat = useCallback(async () => {
+    await saveConfig();
+    setView('chat');
+  }, [saveConfig]);
 
   const serverConfigured = hasServerConfig();
 
@@ -642,38 +668,88 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
       <div className="hero h-full min-h-0 !min-h-0 bg-base-200 animate-fade-in-up">
         <div className="hero-content flex-col py-8">
           <BrandLogo size="lg" className="mb-6" />
-          <h1 className="text-2xl font-bold text-base-content">PoeLInk</h1>
-          <p className="text-base-content/70 text-sm text-center mb-8">AMR 智能诊断助手</p>
+          <h1 className="text-2xl font-bold text-base-content">PoeLink</h1>
+          <p className="text-base-content/70 text-sm text-center mb-8">AMR 问题排查助手</p>
           <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
-            <button type="button" className="btn btn-primary flex-1 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]" onClick={() => setView('config')}>
+            <button
+              type="button"
+              className="btn btn-primary flex-1 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+              onClick={() => {
+                setConfigEntry('welcome');
+                setView('config');
+              }}
+            >
               开始配置
             </button>
-            <button type="button" className="btn btn-outline btn-secondary flex-1 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]" onClick={() => setView('chat')}>
-              跳过配置
-            </button>
+            <a
+              className="btn btn-outline btn-secondary flex-1 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+              href="https://github.com/isreturn-ture/PoeLink"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                <path d="M12 .5C5.65.5.5 5.74.5 12.26c0 5.2 3.44 9.6 8.2 11.16.6.11.82-.27.82-.6 0-.3-.01-1.08-.02-2.12-3.34.75-4.04-1.65-4.04-1.65-.54-1.42-1.33-1.8-1.33-1.8-1.08-.76.08-.74.08-.74 1.2.09 1.83 1.26 1.83 1.26 1.06 1.88 2.78 1.34 3.46 1.02.11-.8.41-1.34.75-1.64-2.66-.31-5.46-1.37-5.46-6.08 0-1.34.46-2.44 1.22-3.3-.12-.31-.53-1.57.12-3.27 0 0 1-.33 3.3 1.26a11.1 11.1 0 0 1 6 0c2.3-1.6 3.3-1.26 3.3-1.26.65 1.7.24 2.96.12 3.27.76.86 1.22 1.96 1.22 3.3 0 4.72-2.8 5.77-5.47 6.07.42.37.8 1.1.8 2.23 0 1.6-.02 2.88-.02 3.27 0 .33.22.72.82.6 4.76-1.56 8.2-5.96 8.2-11.16C23.5 5.74 18.35.5 12 .5z"/>
+              </svg>
+              GitHub 文档
+            </a>
           </div>
           <div className="divider divider-neutral my-6 w-48" />
-          <p className="text-xs text-base-content/50">© 2026 PoeLInk</p>
+          <p className="text-xs text-base-content/50">© 2026 PoeLink · AMR 排查助手</p>
         </div>
       </div>
     );
   }
 
   if (view === 'config') {
-    const pageTitle = isConfigured ? '设置' : '配置向导';
-    const pageSubtitle = isConfigured ? '修改应用配置' : '完成以下设置以启用完整功能';
+    const pageTitle = isConfigured ? '配置中心' : '配置向导';
+    const pageSubtitle = isConfigured ? '调整排查助手的连接与能力配置' : '完成以下设置以启用 AMR 排查功能';
+    const canProceed = isStepComplete(currentStep);
+
+    const handleNextStep = async () => {
+      if (!canProceed) {
+        notifyUser('请先完成当前步骤配置', 'error');
+        return;
+      }
+      if (!isConfigSaved) {
+        const shouldSave = window.confirm('当前配置尚未保存，是否先保存再继续？');
+        if (shouldSave) {
+          await saveConfig();
+        }
+      }
+      setCurrentStep((p) => Math.min(4, p + 1));
+    };
+
+    const handleSaveAndGoChat = () => {
+      if (!canProceed) {
+        notifyUser('请先完成当前步骤配置', 'error');
+        return;
+      }
+      saveAndGoChat();
+    };
+
+    const handleSaveConfig = () => {
+      saveConfig().then(() => {
+        setSaveNotice('配置已保存');
+        window.setTimeout(() => setSaveNotice(''), 2000);
+      });
+    };
 
     return (
       <div className="flex flex-col h-full min-h-0 bg-base-100">
         <Header
           title={pageTitle}
           subtitle={pageSubtitle}
-          onBack={() => setView(isConfigured ? 'chat' : 'welcome')}
+          onBack={() => setView(configEntry)}
           onClose={onClose}
           showClose={showCloseInHeader}
         />
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
+          {saveNotice && (
+            <div role="alert" className="alert alert-success mb-4 animate-slide-up">
+              <span>{saveNotice}</span>
+            </div>
+          )}
           {/* 步骤指示器 - daisyUI steps */}
           <ul className="steps steps-horizontal w-full mb-6 text-xs">
             {steps.map((stepName, index) => {
@@ -703,7 +779,10 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
                     <input className="input input-bordered w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20" placeholder="例如 localhost 或 192.168.1.100" value={config.server.host} onChange={(e) => updateConfig('server', 'host', e.target.value)} />
                     <label className="label"><span className="label-text">端口</span></label>
                     <input className="input input-bordered w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20" placeholder="例如 8080" value={config.server.port} onChange={(e) => updateConfig('server', 'port', e.target.value)} />
-                    <button type="button" className="btn btn-primary mt-2 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={testServer}>测试服务器连接</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn btn-primary transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={testServer}>测试服务器连接</button>
+                      <button type="button" className="btn btn-outline transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={handleSaveConfig}>保存配置</button>
+                    </div>
                     {serverTestStatus && (
                       <div role="alert" className={`alert ${serverTestStatus.includes('成功') ? 'alert-success' : 'alert-error'} mt-2 animate-slide-up`}>
                         <span>{serverTestStatus}</span>
@@ -728,7 +807,10 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
                     <input className="input input-bordered w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20" placeholder="数据库用户名" value={config.database.user} onChange={(e) => updateConfig('database', 'user', e.target.value)} />
                     <label className="label"><span className="label-text">密码</span></label>
                     <input type="password" className="input input-bordered w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20" placeholder="数据库密码" value={config.database.pass} onChange={(e) => updateConfig('database', 'pass', e.target.value)} />
-                    <button type="button" className="btn btn-primary mt-2 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={testDatabase}>测试数据库连接</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn btn-primary transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={testDatabase}>测试数据库连接</button>
+                      <button type="button" className="btn btn-outline transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={handleSaveConfig}>保存配置</button>
+                    </div>
                     {dbTestStatus && (
                       <div role="alert" className={`alert ${dbTestStatus.includes('成功') ? 'alert-success' : 'alert-error'} mt-2 animate-slide-up`}>
                         <span>{dbTestStatus}</span>
@@ -751,7 +833,10 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
                     <input className="input input-bordered w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20" placeholder="运管系统IP" value={config.ops.ip} onChange={(e) => updateConfig('ops', 'ip', e.target.value)} />
                     <label className="label"><span className="label-text">端口</span></label>
                     <input className="input input-bordered w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20" placeholder="运管系统端口" value={config.ops.port} onChange={(e) => updateConfig('ops', 'port', e.target.value)} />
-                    <button type="button" className="btn btn-primary mt-2 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={testOps}>测试运管系统连接</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn btn-primary transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={testOps}>测试运管系统连接</button>
+                      <button type="button" className="btn btn-outline transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={handleSaveConfig}>保存配置</button>
+                    </div>
                     {opsTestStatus && (
                       <div role="alert" className={`alert ${opsTestStatus.includes('成功') ? 'alert-success' : 'alert-error'} mt-2 animate-slide-up`}>
                         <span>{opsTestStatus}</span>
@@ -778,6 +863,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
                       <option value="moonshot">Moonshot (月之暗面 / Kimi)</option>
                       <option value="openai">OpenAI</option>
                     </select>
+                    <button type="button" className="btn btn-outline transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={handleSaveConfig}>保存配置</button>
                   </div>
                 </div>
               </div>
@@ -791,11 +877,21 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
               上一步
             </button>
             {currentStep < 4 ? (
-              <button type="button" className="btn btn-primary flex-1 join-item transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={() => setCurrentStep(p => p + 1)}>
+              <button
+                type="button"
+                className="btn btn-primary flex-1 join-item transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                onClick={handleNextStep}
+                disabled={!canProceed}
+              >
                 下一步
               </button>
             ) : (
-              <button type="button" className="btn btn-primary flex-1 join-item transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]" onClick={saveAndGoChat}>
+              <button
+                type="button"
+                className="btn btn-primary flex-1 join-item transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                onClick={handleSaveAndGoChat}
+                disabled={!canProceed}
+              >
                 保存并进入
               </button>
             )}
@@ -809,7 +905,7 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
   return (
     <div className="flex flex-col h-full min-h-0 bg-base-100">
       <Header
-        title="PoeLInkBot"
+        title="PoeLink"
         subtitle={
           (() => {
             const hasServer = !!(config.server?.host?.trim() && config.server?.port?.trim());
@@ -835,14 +931,23 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
             type="button"
             className="btn btn-ghost btn-sm btn-square transition-all duration-200 hover:scale-110 active:scale-95"
             onClick={clearChatHistory}
-            title="清除聊天记录"
-            aria-label="清除聊天记录"
+            title="清除排查记录"
+            aria-label="清除排查记录"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h7m8 0h3M6 6l1.5 14h9L18 6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2M9 10h.01M12 10h.01M15 10h.01" />
             </svg>
           </button>
-          <button type="button" className="btn btn-ghost btn-sm btn-square transition-all duration-200 hover:scale-110 active:scale-95" onClick={() => setView('config')} title="设置" aria-label="设置">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-square transition-all duration-200 hover:scale-110 active:scale-95"
+            onClick={() => {
+              setConfigEntry('chat');
+              setView('config');
+            }}
+            title="设置"
+            aria-label="设置"
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -868,8 +973,8 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 bg-base-100">
         {!serverConfigured && (
           <div className="rounded-2xl border border-warning/30 bg-base-100 px-4 py-3 text-sm text-warning-content flex flex-wrap items-center gap-3">
-            <span className="font-medium">未完成配置，无法发送请求。</span>
-            <span className="text-xs opacity-70">请先完成服务器配置。</span>
+            <span className="font-medium">未完成配置，暂无法发起 AMR 排查。</span>
+            <span className="text-xs opacity-70">请先完成服务器配置以启用助手。</span>
             <button
               type="button"
               className="btn btn-xs btn-warning ml-auto"
@@ -879,7 +984,26 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
             </button>
           </div>
         )}
-        {messages.length === 0 && !isLoading ? (
+        {!serverConfigured ? (
+          <div className="min-h-[240px] flex flex-col items-center justify-center py-12 animate-fade-in-up text-center">
+            <div className="avatar placeholder mb-4">
+              <div className="w-20 h-20 rounded-full bg-warning/10 border-2 border-warning/30 flex items-center justify-center">
+                <svg className="w-10 h-10 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v4m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-base font-medium text-base-content/80 mb-1">尚未完成服务器配置</p>
+            <p className="text-sm text-base-content/60">完成配置后即可使用 AMR 问题排查助手</p>
+            <button
+              type="button"
+              className="btn btn-sm btn-warning mt-4"
+              onClick={() => setView('config')}
+            >
+              去配置
+            </button>
+          </div>
+        ) : messages.length === 0 && !isLoading ? (
           <div className="min-h-[200px] flex flex-col items-center justify-center py-12 animate-fade-in-up">
             <div className="avatar placeholder mb-4">
               <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center">
@@ -888,8 +1012,8 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
                 </svg>
               </div>
             </div>
-            <p className="text-base font-medium text-base-content/80 mb-1">还没有消息</p>
-            <p className="text-sm text-center max-w-[220px] text-base-content/60">输入问题，获取 AMR 智能诊断</p>
+            <p className="text-base font-medium text-base-content/80 mb-1">还没有排查记录</p>
+            <p className="text-sm text-center max-w-[240px] text-base-content/60">输入问题，启动 AMR 故障排查</p>
             <div className="flex gap-2 mt-4">
               <kbd className="kbd kbd-sm">Enter</kbd>
               <span className="text-xs text-base-content/50">发送</span>
@@ -919,12 +1043,14 @@ const App: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         )}
       </div>
 
-      <ChatInput
-        value={inputValue}
-        onChange={setInputValue}
-        onSend={handleSend}
-        disabled={isLoading || !serverConfigured}
-      />
+      {serverConfigured && (
+        <ChatInput
+          value={inputValue}
+          onChange={setInputValue}
+          onSend={handleSend}
+          disabled={isLoading || !serverConfigured}
+        />
+      )}
     </div>
   );
 };

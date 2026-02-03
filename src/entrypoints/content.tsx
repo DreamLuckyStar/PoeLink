@@ -4,6 +4,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './popup/App';
 import './popup/tailwind.css';
+import { createLogger } from '../utils/logger';
+
+const logUi = createLogger('content-ui', {
+  serialize: { depth: 4, maxKeys: 40, maxArrayLength: 40 },
+});
 
 class ContentScript {
   private ui: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
@@ -31,18 +36,51 @@ class ContentScript {
   private readonly MIN_HEIGHT = 280;
   private readonly MAX_WIDTH = 1200;
   private readonly MAX_HEIGHT = 900;
+  private readonly RESIZE_THRESHOLD = 2;
 
   // 缩放状态
   private isResizing = false;
   private resizeKey: 'n' | 'e' | 's' | 'w' | 'ne' | 'se' | 'sw' | 'nw' | null = null;
   private resizeStartPointer = { x: 0, y: 0 };
   private resizeStartRect = { left: 0, top: 0, width: 0, height: 0 };
+  private resizeStarted = false;
+  private resizeChanged = false;
+  private resizeWasCentered = false;
   private resizePrevTransition: string | null = null;
   private prevUserSelect: string | null = null;
   private prevHtmlUserSelect: string | null = null;
 
   // 过渡状态
   private dragPrevTransition: string | null = null;
+
+  private logPopupState(action: string, extra: Record<string, unknown> = {}) {
+    if (!this.popup) {
+      logUi.debug(action, { popup: 'missing', ...extra });
+      return;
+    }
+    const rect = this.popup.getBoundingClientRect();
+    const payload = {
+      isDragging: this.isDragging,
+      isResizing: this.isResizing,
+      resizeKey: this.resizeKey,
+      position: { left: rect.left, top: rect.top },
+      size: { width: rect.width, height: rect.height },
+      classes: this.popup.className,
+      styles: {
+        position: this.popup.style.position,
+        left: this.popup.style.left,
+        top: this.popup.style.top,
+        right: this.popup.style.right,
+        bottom: this.popup.style.bottom,
+        transform: this.popup.style.transform,
+        inset: this.popup.style.inset,
+        margin: this.popup.style.margin,
+      },
+      ...extra,
+    };
+    logUi.debug(action, payload);
+    window.postMessage({ source: 'POELink', type: 'UI_LOG', action, payload }, '*');
+  }
 
   constructor(ctx: any) {
     this.ctx = ctx;
@@ -52,7 +90,7 @@ class ContentScript {
   private async initialize() {
     this.bindMessageListeners();
     await this.createUI();
-    console.log('POELink 内容脚本已初始化');
+    logUi.info('内容脚本已初始化');
   }
 
   private bindMessageListeners() {
@@ -62,6 +100,19 @@ class ContentScript {
         sendResponse({ success: true });
       }
       return true;
+    });
+
+    window.addEventListener('message', (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || data.source !== 'POELink' || data.type !== 'SET_UI_SIZE') return;
+      if (!this.popup) return;
+      const width = Number(data.width);
+      const height = Number(data.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+      this.popupWidth = width;
+      this.popupHeight = height;
+      this.popup.style.width = `${width}px`;
+      this.popup.style.height = `${height}px`;
     });
   }
 
@@ -124,7 +175,7 @@ class ContentScript {
         `;
         this.popupHeader.innerHTML = `
           <div class="flex items-center">
-            <h3 class="text-base font-semibold text-base-content">PoeLInk</h3>
+            <h3 class="text-base font-semibold text-base-content">PoeLink</h3>
           </div>
           <div class="flex items-center">
             <button id="close-popup" class="h-8 w-8 inline-flex items-center justify-center rounded-md text-base-content/70 transition-all duration-200 hover:scale-110 active:scale-95 hover:bg-base-200 hover:text-base-content" aria-label="关闭">
@@ -258,22 +309,22 @@ class ContentScript {
       if (!key || !this.popup) return;
       this.isResizing = true;
       this.resizeKey = key;
+      this.resizeStarted = false;
+      this.resizeChanged = false;
+      this.resizeWasCentered = this.popup.classList.contains('top-1/2');
       this.resizeStartPointer = { x: e.clientX, y: e.clientY };
       const rect = this.popup.getBoundingClientRect();
       this.resizeStartRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
       this.currentPosition = { left: rect.left, top: rect.top };
       this.resizePrevTransition = this.popup.style.transition;
       this.popup.style.transition = 'none';
-      this.popup.style.left = `${rect.left}px`;
-      this.popup.style.top = `${rect.top}px`;
-      this.popup.style.right = 'auto';
-      this.popup.style.bottom = 'auto';
-      this.popup.style.transform = 'none';
       this.prevUserSelect = document.body.style.userSelect;
       this.prevHtmlUserSelect = document.documentElement.style.userSelect;
       document.body.style.userSelect = 'none';
       document.documentElement.style.userSelect = 'none';
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      logUi.debug('resize-pointerdown', { x: e.clientX, y: e.clientY, key });
+      this.logPopupState('resize-start', { pointer: { x: e.clientX, y: e.clientY }, key });
       e.preventDefault();
       e.stopPropagation();
     };
@@ -284,6 +335,23 @@ class ContentScript {
 
       const dx = e.clientX - this.resizeStartPointer.x;
       const dy = e.clientY - this.resizeStartPointer.y;
+
+      if (!this.resizeStarted) {
+        if (Math.abs(dx) < this.RESIZE_THRESHOLD && Math.abs(dy) < this.RESIZE_THRESHOLD) {
+          return;
+        }
+        this.resizeStarted = true;
+        const { left, top } = this.resizeStartRect;
+        this.popup.style.position = 'fixed';
+        this.popup.style.left = `${left}px`;
+        this.popup.style.top = `${top}px`;
+        this.popup.style.right = 'auto';
+        this.popup.style.bottom = 'auto';
+        this.popup.style.transform = 'none';
+        this.popup.style.margin = '0';
+        this.popup.classList.remove('top-1/2', 'left-1/2', '-translate-x-1/2', '-translate-y-1/2');
+        this.logPopupState('resize-activate', { pointer: { x: e.clientX, y: e.clientY } });
+      }
 
       let { left, top, width, height } = this.resizeStartRect;
       const viewportPadding = 8;
@@ -315,6 +383,15 @@ class ContentScript {
       left = Math.min(Math.max(viewportPadding, left), window.innerWidth - width - viewportPadding);
       top = Math.min(Math.max(viewportPadding, top), window.innerHeight - height - viewportPadding);
 
+      if (!this.resizeChanged) {
+        const changed =
+          Math.round(left) !== Math.round(this.resizeStartRect.left) ||
+          Math.round(top) !== Math.round(this.resizeStartRect.top) ||
+          Math.round(width) !== Math.round(this.resizeStartRect.width) ||
+          Math.round(height) !== Math.round(this.resizeStartRect.height);
+        this.resizeChanged = changed;
+      }
+
       this.popupWidth = width;
       this.popupHeight = height;
       this.currentPosition = { left, top };
@@ -325,12 +402,28 @@ class ContentScript {
       this.popup.style.right = 'auto';
       this.popup.style.bottom = 'auto';
       this.popup.style.transform = 'none';
+      this.logPopupState('resize-move', { pointer: { x: e.clientX, y: e.clientY } });
     };
 
     const end = () => {
       if (!this.isResizing) return;
       this.isResizing = false;
       this.resizeKey = null;
+      this.resizeStarted = false;
+      if (!this.resizeChanged && this.popup && this.resizeWasCentered) {
+        this.popup.style.position = '';
+        this.popup.style.left = '';
+        this.popup.style.top = '';
+        this.popup.style.right = '';
+        this.popup.style.bottom = '';
+        this.popup.style.inset = '';
+        this.popup.style.transform = '';
+        this.popup.style.margin = '';
+        this.popup.classList.add('top-1/2', 'left-1/2', '-translate-x-1/2', '-translate-y-1/2');
+      }
+      this.resizeChanged = false;
+      this.resizeWasCentered = false;
+      this.logPopupState('resize-end');
       if (this.popup && this.resizePrevTransition !== null) {
         this.popup.style.transition = this.resizePrevTransition;
         this.resizePrevTransition = null;
@@ -373,6 +466,8 @@ class ContentScript {
       document.body.style.userSelect = 'none';
       document.documentElement.style.userSelect = 'none';
       handle.setPointerCapture(e.pointerId);
+      logUi.debug('drag-pointerdown', { x: e.clientX, y: e.clientY });
+      this.logPopupState('drag-start', { pointer: { x: e.clientX, y: e.clientY } });
       e.preventDefault();
       e.stopPropagation();
     };
@@ -460,11 +555,13 @@ class ContentScript {
       // 应用新位置
       this.dragTarget.style.left = `${this.currentPosition.left}px`;
       this.dragTarget.style.top = `${this.currentPosition.top}px`;
+      this.logPopupState('drag-move', { pointer: { x: clientX, y: clientY } });
     };
 
     const end = () => {
       if (!this.isDragging) return;
       this.isDragging = false;
+      this.logPopupState('drag-end');
       if (this.dragTarget && this.dragPrevTransition !== null) {
         this.dragTarget.style.transition = this.dragPrevTransition;
         this.dragPrevTransition = null;
@@ -521,7 +618,7 @@ class ContentScript {
       this.reactRoot.unmount();
       this.reactRoot = null;
     }
-    console.log('POELink UI 已清理');
+    logUi.info('UI 已清理');
   }
 
   public destroy() {

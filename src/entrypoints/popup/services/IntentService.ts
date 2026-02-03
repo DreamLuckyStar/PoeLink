@@ -1,3 +1,7 @@
+import { createLogger } from '../../../utils/logger';
+
+const logIntent = createLogger('intent');
+
 /**
  * 前端意图识别服务
  * 因后端无法连接外网，意图识别在前端完成，调用 LLM API（需用户配置 API Key）
@@ -142,7 +146,7 @@ export async function recognizeIntent(
         };
       }
     } catch (err) {
-      console.warn('[IntentService] LLM 调用失败，使用本地识别:', err);
+      logIntent.warn('LLM 调用失败，使用本地识别', err);
     }
   }
 

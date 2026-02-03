@@ -23,7 +23,23 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: "Plus Jakarta Sans", "Inter", "Segoe UI", system-ui, sans-serif;
+  font-family:
+    "Plus Jakarta Sans",
+    "Inter",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "SF Pro Display",
+    "Segoe UI",
+    "Roboto",
+    "Noto Sans CJK SC",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
   background: rgb(var(--bg));
   color: rgb(var(--text));
   -webkit-font-smoothing: antialiased;

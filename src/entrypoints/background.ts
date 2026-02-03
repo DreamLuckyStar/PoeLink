@@ -1,4 +1,7 @@
 import { defineBackground } from 'wxt/utils/define-background';
+import { createLogger } from '../utils/logger';
+
+const logBg = createLogger('background');
 
 interface Message {
   type: string;
@@ -23,14 +26,14 @@ export default defineBackground({
     // 监听扩展图标点击事件
     browser.action.onClicked.addListener((tab) => {
       if (tab.id) {
-        console.log('扩展图标被点击，向内容脚本发送消息');
+        logBg.info('扩展图标被点击，向内容脚本发送消息', { tabId: tab.id });
         browser.tabs.sendMessage(tab.id, { type: 'TOGGLE_FLOATING' });
       }
     });
 
     // 监听来自内容脚本/Popup的消息
     browser.runtime.onMessage.addListener((request: Message, sender, sendResponse) => {
-      // console.log('收到消息:', request.type);
+      logBg.debug('收到消息', { type: request.type, fromTabId: sender.tab?.id, request });
 
       const handleAsync = async () => {
         try {
@@ -43,9 +46,9 @@ export default defineBackground({
                 iconUrl: 'chrome://favicon/size/64@1x/chrome://extensions',
                 ...(request.options ?? {})
               };
-              console.log('[Notify][BG] request', notifyOptions);
+              logBg.debug('[Notify] request', notifyOptions);
               await browser.notifications.create('', notifyOptions);
-              console.log('[Notify][BG] created');
+              logBg.debug('[Notify] created');
               return { success: true };
 
             case 'OPEN_NOTIFICATION_SETTINGS':
@@ -86,7 +89,7 @@ export default defineBackground({
               return { success: false, error: '未知消息类型' };
           }
         } catch (error: any) {
-          console.error(`处理消息 ${request.type} 失败:`, error);
+          logBg.error(`处理消息 ${request.type} 失败`, error);
           return { success: false, error: error.message };
         }
       };
@@ -98,7 +101,7 @@ export default defineBackground({
     // 定时同步Cookie任务 - 每30秒执行一次
     setInterval(runCookieSyncTask, 30000);
 
-    console.log('后台服务工作线程已启动');
+    logBg.info('后台服务工作线程已启动');
   }
 });
 
@@ -277,7 +280,7 @@ async function runCookieSyncTask() {
         },
         cookies: standardCookies
       });
-      console.log('自动同步 Cookie 成功');
+      logBg.info('自动同步 Cookie 成功', { count: filteredCookies.length });
     }
   } catch (error) {
     // 忽略静默失败，避免刷屏
@@ -293,7 +296,7 @@ async function getPoeLinkConfig() {
     const config = result.poelink_config as PoeLinkConfig | undefined;
     return config || null;
   } catch (error) {
-    console.error('获取服务器配置失败:', error);
+    logBg.error('获取服务器配置失败', error);
     return null;
   }
 }

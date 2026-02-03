@@ -1,4 +1,7 @@
 import { browser } from 'wxt/browser';
+import { createLogger } from '../../../utils/logger';
+
+const logComm = createLogger('comm');
 
 interface Message {
   type: string;
@@ -27,7 +30,7 @@ class CommunicationService {
       const response = await browser.runtime.sendMessage(message);
       return response;
     } catch (error) {
-      console.error('向后台发送消息失败:', error);
+      logComm.error('向后台发送消息失败', error);
       throw error;
     }
   }
@@ -59,7 +62,7 @@ class CommunicationService {
         options
       });
     } catch (error) {
-      console.error('API调用失败:', error);
+      logComm.error('API 调用失败', error);
       throw error;
     }
   }
@@ -121,12 +124,12 @@ class CommunicationService {
     try {
       const runtimeBrowser = (globalThis as any).browser ?? (globalThis as any).chrome;
       const notificationsApi = runtimeBrowser?.notifications;
-      console.log('[Notify] request', options);
+      logComm.debug('[Notify] request', options);
       if (typeof Notification !== 'undefined') {
-        console.log('[Notify] permission before', Notification.permission);
+        logComm.debug('[Notify] permission before', Notification.permission);
         if (Notification.permission === 'default') {
           await Notification.requestPermission();
-          console.log('[Notify] permission after request', Notification.permission);
+          logComm.debug('[Notify] permission after request', Notification.permission);
         }
         if (Notification.permission === 'granted') {
           const webOptions: NotificationOptions = {
@@ -137,22 +140,22 @@ class CommunicationService {
             requireInteraction: options?.requireInteraction,
           };
           const instance = new Notification(options?.title ?? 'PoeLink', webOptions);
-          instance.onerror = (event) => console.warn('[Notify] web notification error', event);
-          instance.onshow = () => console.log('[Notify] web notification shown');
-          instance.onclick = () => console.log('[Notify] web notification clicked');
-          instance.onclose = () => console.log('[Notify] web notification closed');
+          instance.onerror = (event) => logComm.warn('[Notify] web notification error', event);
+          instance.onshow = () => logComm.debug('[Notify] web notification shown');
+          instance.onclick = () => logComm.debug('[Notify] web notification clicked');
+          instance.onclose = () => logComm.debug('[Notify] web notification closed');
           return;
         }
       }
       if (notificationsApi?.create) {
-        console.log('[Notify] fallback to browser.notifications');
+        logComm.debug('[Notify] fallback to browser.notifications');
         await notificationsApi.create('', options);
-        console.log('[Notify] browser.notifications created');
+        logComm.debug('[Notify] browser.notifications created');
         return;
       }
-      console.log('[Notify] Notifications API unavailable, fallback to background');
+      logComm.info('[Notify] Notifications API unavailable, fallback to background');
     } catch (error) {
-      console.warn('通知创建失败，回退到后台:', error);
+      logComm.warn('通知创建失败，回退到后台', error);
     }
     await this.sendMessageToBackground({
       type: 'notify',
@@ -168,7 +171,7 @@ class CommunicationService {
     try {
       await this.sendMessageToBackground({ type: 'TOGGLE_FLOATING_BG' });
     } catch (error) {
-      console.error('切换悬浮窗请求失败:', error);
+      logComm.error('切换悬浮窗请求失败', error);
     }
   }
 }
