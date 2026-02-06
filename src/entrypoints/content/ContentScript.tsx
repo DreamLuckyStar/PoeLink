@@ -1,7 +1,9 @@
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from '../popup/App';
+import MainApp from '../popup/MainApp';
+import DisclaimerModal from '../../components/popup/DisclaimerModal';
+import storageService from '../popup/services/StorageService';
 import '../popup/tailwind.css';
 import { createLogger } from '../../utils/logger';
 import PopupInteractionController from '../../components/content/PopupInteractionController';
@@ -12,13 +14,20 @@ const logUi = createLogger('content-ui', {
 
 export default class ContentScript {
   private ui: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
+  private disclaimerUi: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
   private isPopupVisible = false;
   private floatingBall: HTMLElement | null = null;
   private popup: HTMLElement | null = null;
   private popupHeader: HTMLElement | null = null;
   private reactRoot: ReactDOM.Root | null = null;
+  private disclaimerRoot: ReactDOM.Root | null = null;
+  private uiContainer: HTMLElement | null = null;
+  private disclaimerContainer: HTMLElement | null = null;
   private ctx: any;
   private interactionController: PopupInteractionController | null = null;
+  private disclaimerAgreed = false;
+  // 防止悬浮球点击导致的 poelink:toggle 事件重复触发两次 togglePopup
+  private suppressNextToggleEvent = false;
 
   // 尺寸与缩放
   private popupWidth = Math.min(window.innerWidth * 0.95, 720);
@@ -36,8 +45,15 @@ export default class ContentScript {
 
   private async initialize() {
     this.bindMessageListeners();
+    await this.checkDisclaimerState();
     await this.createUI();
     logUi.info('内容脚本已初始化');
+  }
+
+  private async checkDisclaimerState() {
+    // 检查免责声明状态
+    const state = await storageService.getDisclaimerState();
+    this.disclaimerAgreed = state?.agreed === true;
   }
 
   private bindMessageListeners() {
@@ -71,6 +87,7 @@ export default class ContentScript {
       append: 'last',
       isolateEvents: true,
       onMount: (container) => {
+        this.uiContainer = container;
         container.setAttribute('data-theme', 'corporate');
         container.style.pointerEvents = 'none';
         container.style.position = 'absolute';
@@ -98,26 +115,128 @@ export default class ContentScript {
           </svg>
         `;
 
-        this.popup = document.createElement('div');
-        this.popup.className = `
+        this.floatingBall.addEventListener('click', () => this.handleFloatingBallClick());
+        container.appendChild(this.floatingBall);
+
+        return container;
+      },
+      onRemove: () => {
+        this.cleanup();
+      },
+    });
+
+    this.ui.mount();
+  }
+
+  private handleFloatingBallClick() {
+    logUi.debug('悬浮球被点击', { disclaimerAgreed: this.disclaimerAgreed, isPopupVisible: this.isPopupVisible });
+    // 如果未同意免责声明，显示免责声明弹窗
+    if (!this.disclaimerAgreed) {
+      this.showDisclaimerModal();
+      return;
+    }
+    // 否则切换主弹窗
+    // 由于 PopupInteractionController 也会在悬浮球点击时派发一次 poelink:toggle，
+    // 这里提前标记，避免 togglePopup 被调用两次导致“开关抵消”。
+    this.suppressNextToggleEvent = true;
+    this.togglePopup();
+  }
+
+  private async showDisclaimerModal() {
+    if (this.disclaimerUi) return; // 已经显示
+
+    this.disclaimerUi = await createShadowRootUi(this.ctx, {
+      name: 'poelink-disclaimer-ui',
+      position: 'inline',
+      anchor: 'body',
+      append: 'last',
+      isolateEvents: true,
+      onMount: (container) => {
+        this.disclaimerContainer = container;
+        container.setAttribute('data-theme', 'corporate');
+        container.style.position = 'fixed';
+        container.style.inset = '0';
+        container.style.zIndex = '2147483648'; // 比主弹窗更高
+        container.className = 'all-unset';
+
+        const disclaimerWrapper = document.createElement('div');
+        disclaimerWrapper.className = 'w-full h-full';
+        container.appendChild(disclaimerWrapper);
+
+        this.disclaimerRoot = ReactDOM.createRoot(disclaimerWrapper);
+        this.disclaimerRoot.render(
+          <React.StrictMode>
+            <DisclaimerModal
+              allowDontShowAgain={false}
+              defaultDontShowAgain={false}
+              onAgree={async ({ dontShowAgain }) => {
+                await storageService.setDisclaimerState({ agreed: true, dontShowAgain });
+                this.disclaimerAgreed = true;
+                this.hideDisclaimerModal();
+                logUi.info('用户同意免责声明');
+              }}
+              onCancel={async () => {
+                await storageService.setDisclaimerState({ agreed: false, dontShowAgain: false });
+                this.disclaimerAgreed = false;
+                this.hideDisclaimerModal();
+                logUi.info('用户取消免责声明');
+              }}
+            />
+          </React.StrictMode>
+        );
+
+        return container;
+      },
+      onRemove: () => {
+        if (this.disclaimerRoot) {
+          this.disclaimerRoot.unmount();
+          this.disclaimerRoot = null;
+        }
+        this.disclaimerContainer = null;
+      },
+    });
+
+    this.disclaimerUi.mount();
+  }
+
+  private hideDisclaimerModal() {
+    if (this.disclaimerUi) {
+      this.disclaimerUi.remove();
+      this.disclaimerUi = null;
+    }
+    if (this.disclaimerRoot) {
+      this.disclaimerRoot.unmount();
+      this.disclaimerRoot = null;
+    }
+    this.disclaimerContainer = null;
+  }
+
+  private ensurePopup() {
+    logUi.debug('ensurePopup 被调用', { hasPopup: !!this.popup, hasContainer: !!this.uiContainer });
+    if (this.popup || !this.uiContainer) return;
+
+    const container = this.uiContainer;
+
+    this.popup = document.createElement('div');
+    this.popup.className = `
           pointer-events-none fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
           bg-base-100 text-base-content rounded-2xl shadow-2xl border border-base-300 flex flex-col overflow-hidden
           opacity-0 scale-95 transition-all duration-300 ease-out
           will-change-transform
         `;
-        this.popup.style.zIndex = '999998';
-        this.popup.style.width = `${this.popupWidth}px`;
-        this.popup.style.height = `${this.popupHeight}px`;
-        this.popup.style.minWidth = `${this.MIN_WIDTH}px`;
-        this.popup.style.minHeight = `${this.MIN_HEIGHT}px`;
-        this.popup.style.touchAction = 'none';
+    this.popup.style.zIndex = '999998';
+    this.popup.style.width = `${this.popupWidth}px`;
+    this.popup.style.height = `${this.popupHeight}px`;
+    this.popup.style.minWidth = `${this.MIN_WIDTH}px`;
+    this.popup.style.minHeight = `${this.MIN_HEIGHT}px`;
+    this.popup.style.touchAction = 'none';
 
-        this.popupHeader = document.createElement('div');
-        this.popupHeader.className = `
+    this.popupHeader = document.createElement('div');
+    this.popupHeader.className = `
           flex items-center justify-between bg-base-100 border-b border-base-300 px-4 py-3
           shrink-0 cursor-move select-none
         `;
-        this.popupHeader.innerHTML = `
+    this.popupHeader.innerHTML = `
           <div class="flex items-center">
             <h3 class="text-base font-semibold text-base-content">PoeLink</h3>
           </div>
@@ -131,41 +250,63 @@ export default class ContentScript {
           </div>
         `;
 
-        const content = document.createElement('div');
-        content.className = 'flex-1 min-h-0 overflow-hidden flex flex-col';
-        const appRoot = document.createElement('div');
-        appRoot.className = 'flex-1 min-h-0 w-full h-full bg-base-100 text-base-content';
-        content.appendChild(appRoot);
+    const content = document.createElement('div');
+    content.className = 'flex-1 min-h-0 overflow-hidden flex flex-col';
+    const appRoot = document.createElement('div');
+    appRoot.className = 'flex-1 min-h-0 w-full h-full bg-base-100 text-base-content';
+    content.appendChild(appRoot);
 
-        this.popup.appendChild(this.popupHeader);
-        this.popup.appendChild(content);
+    this.popup.appendChild(this.popupHeader);
+    this.popup.appendChild(content);
 
-        container.appendChild(this.floatingBall);
-        container.appendChild(this.popup);
+    container.appendChild(this.popup);
 
-        this.reactRoot = ReactDOM.createRoot(appRoot);
-        this.reactRoot.render(
-          <React.StrictMode>
-            <App onClose={() => this.hidePopup()} showCloseInHeader={false} />
-          </React.StrictMode>
-        );
+    this.reactRoot?.unmount();
+    this.reactRoot = ReactDOM.createRoot(appRoot);
+    this.reactRoot.render(
+      <React.StrictMode>
+        <MainApp onClose={() => this.teardownPopup()} showCloseInHeader={false} />
+      </React.StrictMode>
+    );
 
-        this.bindEvents();
+    this.bindEvents();
+  }
 
-        return container;
-      },
-      onRemove: () => {
-        this.cleanup();
-      },
-    });
+  private teardownPopup() {
+    logUi.debug('teardownPopup 被调用', { hasPopup: !!this.popup, hasFloatingBall: !!this.floatingBall });
+    if (!this.floatingBall) return;
 
-    this.ui.mount();
+    this.interactionController?.unbind();
+    this.interactionController = null;
+
+    if (this.reactRoot) {
+      this.reactRoot.unmount();
+      this.reactRoot = null;
+    }
+
+    if (this.popup) {
+      this.popup.remove();
+      this.popup = null;
+    }
+    this.popupHeader = null;
+
+    this.floatingBall.classList.remove('opacity-0', 'pointer-events-none', 'scale-90');
+    this.isPopupVisible = false;
+    
+    logUi.info('弹窗已销毁，状态已重置');
   }
 
   private bindEvents() {
     if (!this.floatingBall || !this.popup || !this.popupHeader) return;
 
-    this.popup.addEventListener('poelink:toggle', () => this.togglePopup());
+    this.popup.addEventListener('poelink:toggle', () => {
+      // 如果是刚刚由悬浮球点击触发的 toggle，则忽略这次事件，避免二次切换
+      if (this.suppressNextToggleEvent) {
+        this.suppressNextToggleEvent = false;
+        return;
+      }
+      this.togglePopup();
+    });
     this.popup.addEventListener('poelink:close', () => this.hidePopup());
 
     this.interactionController = new PopupInteractionController({
@@ -192,12 +333,17 @@ export default class ContentScript {
   }
 
   private showPopup() {
-    if (!this.popup || !this.floatingBall) return;
+    logUi.debug('showPopup 被调用', { hasFloatingBall: !!this.floatingBall });
+    if (!this.floatingBall) return;
+    this.ensurePopup();
+    logUi.debug('ensurePopup 完成后', { hasPopup: !!this.popup });
+    if (!this.popup) return;
 
     this.floatingBall.classList.add('opacity-0', 'pointer-events-none', 'scale-90');
     this.popup.classList.remove('opacity-0', 'scale-95', 'pointer-events-none');
     this.popup.classList.add('opacity-100', 'scale-100', 'pointer-events-auto');
     this.isPopupVisible = true;
+    logUi.info('弹窗已显示');
   }
 
   private hidePopup() {
@@ -214,16 +360,27 @@ export default class ContentScript {
       this.reactRoot.unmount();
       this.reactRoot = null;
     }
+
+    if (this.disclaimerRoot) {
+      this.disclaimerRoot.unmount();
+      this.disclaimerRoot = null;
+    }
+
+    this.uiContainer = null;
+    this.disclaimerContainer = null;
     logUi.info('UI 已清理');
   }
 
   public destroy() {
     this.ui?.remove();
+    this.disclaimerUi?.remove();
     this.cleanup();
     this.ui = null;
+    this.disclaimerUi = null;
     this.floatingBall = null;
     this.popup = null;
     this.popupHeader = null;
+    this.interactionController?.unbind();
     this.interactionController = null;
   }
 }

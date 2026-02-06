@@ -16,8 +16,11 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
+    "rehype-slug": "^6.0.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",

@@ -49,6 +49,9 @@ export default class PopupInteractionController {
   private prevUserSelect: string | null = null;
   private prevHtmlUserSelect: string | null = null;
 
+  private disposers: Array<() => void> = [];
+  private bound = false;
+
   constructor(options: PopupInteractionOptions) {
     this.popup = options.popup;
     this.popupHeader = options.popupHeader;
@@ -64,20 +67,44 @@ export default class PopupInteractionController {
   }
 
   public bind() {
-    this.floatingBall.addEventListener('click', (e) => {
+    if (this.bound) return;
+    this.bound = true;
+
+    const onBallClick = (e: Event) => {
       e.stopPropagation();
       if (this.hasDragged) return;
       this.popup.dispatchEvent(new CustomEvent('poelink:toggle'));
-    });
+    };
+    this.floatingBall.addEventListener('click', onBallClick);
+    this.disposers.push(() => this.floatingBall.removeEventListener('click', onBallClick));
 
-    this.popupHeader.querySelector('#close-popup')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.popup.dispatchEvent(new CustomEvent('poelink:close'));
-    });
+    const closeBtn = this.popupHeader.querySelector('#close-popup');
+    if (closeBtn) {
+      const onCloseClick = (e: Event) => {
+        e.stopPropagation();
+        this.popup.dispatchEvent(new CustomEvent('poelink:close'));
+      };
+      closeBtn.addEventListener('click', onCloseClick);
+      this.disposers.push(() => closeBtn.removeEventListener('click', onCloseClick));
+    }
 
     this.makeDraggable(this.floatingBall);
     this.makeDraggable(this.popup, this.popupHeader);
     this.makeResizable();
+  }
+
+  public unbind() {
+    if (!this.bound) return;
+    this.bound = false;
+    const disposers = this.disposers;
+    this.disposers = [];
+    for (const dispose of disposers) {
+      try {
+        dispose();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   public hasRecentDrag() {
@@ -256,10 +283,14 @@ export default class PopupInteractionController {
 
     handles.forEach((handle) => {
       (handle as HTMLElement).addEventListener('pointerdown', start as EventListener);
+      this.disposers.push(() => (handle as HTMLElement).removeEventListener('pointerdown', start as EventListener));
     });
     document.addEventListener('pointermove', move as EventListener);
+    this.disposers.push(() => document.removeEventListener('pointermove', move as EventListener));
     document.addEventListener('pointerup', end);
+    this.disposers.push(() => document.removeEventListener('pointerup', end));
     document.addEventListener('pointercancel', end);
+    this.disposers.push(() => document.removeEventListener('pointercancel', end));
   }
 
   private makeDraggable(element: HTMLElement, handle = element) {
@@ -391,8 +422,12 @@ export default class PopupInteractionController {
     };
 
     handle.addEventListener('pointerdown', start as EventListener);
+    this.disposers.push(() => handle.removeEventListener('pointerdown', start as EventListener));
     document.addEventListener('pointermove', move as EventListener);
+    this.disposers.push(() => document.removeEventListener('pointermove', move as EventListener));
     document.addEventListener('pointerup', end);
+    this.disposers.push(() => document.removeEventListener('pointerup', end));
     document.addEventListener('pointercancel', end);
+    this.disposers.push(() => document.removeEventListener('pointercancel', end));
   }
 }

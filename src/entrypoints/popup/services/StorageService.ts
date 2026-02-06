@@ -65,6 +65,14 @@ interface Config {
   app?: AppSettings;
 }
 
+interface DisclaimerState {
+  agreed: boolean;
+  dontShowAgain: boolean;
+  updatedAt: number;
+}
+
+const DISCLAIMER_STORAGE_KEY = 'poelink_disclaimer_state';
+
 class StorageService {
   /**
    * 保存配置到本地存储
@@ -252,6 +260,35 @@ class StorageService {
     }
   }
 
+  async getDisclaimerState(): Promise<DisclaimerState | null> {
+    try {
+      const result = await browser.storage.local.get([DISCLAIMER_STORAGE_KEY]);
+      const state = result[DISCLAIMER_STORAGE_KEY] as DisclaimerState | undefined;
+      if (!state || typeof state !== 'object') return null;
+      if (typeof state.agreed !== 'boolean') return null;
+      if (typeof state.dontShowAgain !== 'boolean') return null;
+      if (typeof state.updatedAt !== 'number') return null;
+      return state;
+    } catch (error) {
+      logStorage.error('获取免责声明状态失败', error);
+      return null;
+    }
+  }
+
+  async setDisclaimerState(state: Omit<DisclaimerState, 'updatedAt'> & { updatedAt?: number }): Promise<void> {
+    try {
+      const next: DisclaimerState = {
+        agreed: Boolean(state.agreed),
+        dontShowAgain: Boolean(state.dontShowAgain),
+        updatedAt: typeof state.updatedAt === 'number' ? state.updatedAt : Date.now(),
+      };
+      await browser.storage.local.set({ [DISCLAIMER_STORAGE_KEY]: next });
+    } catch (error) {
+      logStorage.error('保存免责声明状态失败', error);
+      throw error;
+    }
+  }
+
   /**
    * 清除所有存储的数据
    */
@@ -265,7 +302,13 @@ class StorageService {
 
   async clearAll(): Promise<void> {
     try {
-      await browser.storage.local.remove(['poelink_config', 'poelink_messages', 'poelink_sessions', 'poelink_active_session_id']);
+      await browser.storage.local.remove([
+        'poelink_config',
+        'poelink_messages',
+        'poelink_sessions',
+        'poelink_active_session_id',
+        DISCLAIMER_STORAGE_KEY,
+      ]);
     } catch (error) {
       logStorage.error('清除存储失败', error);
       throw error;

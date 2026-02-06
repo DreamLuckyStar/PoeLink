@@ -78,13 +78,16 @@ const ChatView: React.FC<ChatViewProps> = ({
           serverConfigured ? (
             versionLoading ? (
               <span className="loading loading-spinner loading-xs" />
-            ) : componentVersions.rcs || componentVersions.iwms ? (
+            ) : componentVersions.rcs || componentVersions.iwms || componentVersions.ops ? (
               <div className="flex flex-wrap items-center justify-end gap-1">
                 {componentVersions.rcs && (
                   <span className="badge badge-outline badge-xs whitespace-nowrap">RCS {componentVersions.rcs}</span>
                 )}
                 {componentVersions.iwms && (
                   <span className="badge badge-outline badge-xs whitespace-nowrap">IWMS {componentVersions.iwms}</span>
+                )}
+                {componentVersions.ops && (
+                  <span className="badge badge-outline badge-xs whitespace-nowrap">OPS {componentVersions.ops}</span>
                 )}
               </div>
             ) : null

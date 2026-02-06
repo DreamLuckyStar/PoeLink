@@ -75,6 +75,7 @@ export interface AppConfig {
 export interface ComponentVersions {
   rcs?: string;
   iwms?: string;
+  ops?: string;
 }
 
 export type ConfigSection = Exclude<keyof AppConfig, 'configId' | 'llm'>;

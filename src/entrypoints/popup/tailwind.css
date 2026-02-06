@@ -445,6 +445,119 @@ html, body {
     @apply flex items-center justify-center;
   }
 
+  /* Markdown typography (used by 免责声明弹窗) */
+  .prose {
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: rgb(var(--text));
+  }
+
+  .prose-sm {
+    font-size: 0.85rem;
+  }
+
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4 {
+    font-weight: 600;
+    line-height: 1.4;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    color: rgb(var(--text));
+  }
+
+  .prose h1 {
+    font-size: 1.3rem;
+    margin-top: 0;
+  }
+
+  .prose h2 {
+    font-size: 1.15rem;
+  }
+
+  .prose h3 {
+    font-size: 1.05rem;
+  }
+
+  .prose p {
+    margin-top: 0.4rem;
+    margin-bottom: 0.6rem;
+    color: rgb(var(--text-muted));
+  }
+
+  .prose strong {
+    color: rgb(var(--text));
+    font-weight: 600;
+  }
+
+  .prose ul,
+  .prose ol {
+    padding-left: 1.25rem;
+    margin-top: 0.35rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .prose li {
+    margin: 0.1rem 0;
+  }
+
+  .prose blockquote {
+    margin: 0.6rem 0 0.8rem;
+    padding-left: 0.8rem;
+    border-left: 3px solid rgb(var(--primary));
+    color: rgb(var(--text-muted));
+    font-style: italic;
+  }
+
+  .prose table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.75rem;
+    margin-bottom: 0.9rem;
+    font-size: 0.8rem;
+  }
+
+  .prose thead {
+    background: rgb(var(--bg-muted));
+  }
+
+  .prose th,
+  .prose td {
+    padding: 0.35rem 0.5rem;
+    border: 1px solid rgb(var(--border));
+    text-align: left;
+  }
+
+  .prose code {
+    font-family:
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Monaco,
+      Consolas,
+      "Liberation Mono",
+      "Courier New",
+      monospace;
+    font-size: 0.8em;
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.25rem;
+    background: rgb(var(--bg-muted));
+  }
+
+  .prose a {
+    color: rgb(var(--primary));
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
+  .prose hr {
+    margin: 1.2rem 0;
+    border: none;
+    border-top: 1px dashed rgb(var(--border));
+  }
+
   .kbd {
     display: inline-flex;
     align-items: center;
