@@ -1,3 +1,4 @@
+import { browser } from 'wxt/browser';
 import { buildBaseUrl, buildServerIdentifier, getBackendServerConfig, getPoeLinkConfig, normalizeServerConfig } from '../utils/config';
 import type { LoggerLike } from '../sharedTypes';
 

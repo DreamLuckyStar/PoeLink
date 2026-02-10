@@ -7,7 +7,7 @@ import type { AppI18nKey } from '../../i18n';
 
 type TFunc = (key: AppI18nKey, params?: Record<string, string | number>) => string;
 
-const STREAM_CHUNK_SIZE = 3;
+export const STREAM_CHUNK_SIZE = 3;
 
 interface MessageBubbleProps {
   msg: Message;
@@ -27,10 +27,10 @@ const MessageBubble = ({ msg, index, streamIntervalMs, t }: MessageBubbleProps) 
       return;
     }
     if (displayLen >= fullLen) return;
-    const t = setInterval(() => {
+    const timerId = setInterval(() => {
       setDisplayLen((prev) => Math.min(prev + STREAM_CHUNK_SIZE, fullLen));
     }, streamIntervalMs);
-    return () => clearInterval(t);
+    return () => clearInterval(timerId);
   }, [msg.streaming, fullLen, displayLen, streamIntervalMs]);
 
   const text = msg.streaming ? msg.content.slice(0, displayLen) : msg.content;

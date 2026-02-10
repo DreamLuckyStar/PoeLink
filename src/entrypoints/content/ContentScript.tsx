@@ -273,12 +273,13 @@ export default class ContentScript {
       { key: 'se', style: 'bottom:0;right:0;width:10px;height:10px;cursor:se-resize' },
       { key: 'sw', style: 'bottom:0;left:0;width:10px;height:10px;cursor:sw-resize' },
     ];
+    const popupEl = this.popup;
     resizeHandles.forEach(({ key, style }) => {
       const handle = document.createElement('div');
       handle.setAttribute('data-resize', key);
       handle.setAttribute('aria-hidden', 'true');
       handle.style.cssText = `position:absolute;${style};z-index:10;pointer-events:auto;`;
-      this.popup.appendChild(handle);
+      popupEl.appendChild(handle);
     });
 
     container.appendChild(this.popup);
@@ -372,24 +373,27 @@ export default class ContentScript {
     this.popup.style.opacity = '0';
 
     this.floatingBall.classList.remove('opacity-0', 'pointer-events-none', 'scale-90');
-    this.floatingBall.style.transition = 'transform 0.25s ease-out';
-    this.floatingBall.style.transform = 'scale(0.6)';
+    const floatingBall = this.floatingBall;
+    floatingBall.style.transition = 'transform 0.25s ease-out';
+    floatingBall.style.transform = 'scale(0.6)';
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        this.floatingBall.style.transform = 'scale(1)';
+        floatingBall.style.transform = 'scale(1)';
       });
     });
 
+    const popup = this.popup;
     let ended = false;
     const onEnd = () => {
       if (ended) return;
       ended = true;
-      this.popup.removeEventListener('transitionend', onEnd);
-      if (!this.popup) return;
-      this.popup.style.transition = '';
-      this.popup.style.transform = '';
-      this.popup.style.opacity = '';
-      this.popup.style.pointerEvents = '';
+      popup.removeEventListener('transitionend', onEnd);
+      if (this.popup) {
+        this.popup.style.transition = '';
+        this.popup.style.transform = '';
+        this.popup.style.opacity = '';
+        this.popup.style.pointerEvents = '';
+      }
       if (this.floatingBall) {
         this.floatingBall.style.transition = '';
         this.floatingBall.style.transform = '';
@@ -398,7 +402,7 @@ export default class ContentScript {
       this.isPopupVisible = false;
       logUi.info('弹窗已收缩为悬浮球');
     };
-    this.popup.addEventListener('transitionend', onEnd);
+    popup.addEventListener('transitionend', onEnd);
     setTimeout(onEnd, durationMs + 80);
   }
 

@@ -158,7 +158,7 @@ export async function analyzeInputOnce(
   const intent = String(intentResult?.intent ?? 'unknown');
   const safeIntent: IntentResult['intent'] = (INTENT_TYPES as readonly string[]).includes(intent)
     ? (intent as IntentResult['intent'])
-    : (intent === 'unknown' ? 'unknown' : 'unknown');
+    : 'unknown';
 
   return {
     intentResult: {

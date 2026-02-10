@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { browser } from 'wxt/browser';
 
 import storageService, { type ChatSession as StoredChatSession } from '../entrypoints/popup/services/StorageService';
 import type { Message } from '../entrypoints/popup/types';
@@ -30,33 +29,6 @@ export const useChatSessions = ({ closeHistory, log }: { closeHistory: () => voi
     return () => {
       mounted = false;
     };
-  }, []);
-
-  useEffect(() => {
-    const handleStorageChange = (changes: Record<string, any>, areaName: string) => {
-      if (areaName !== 'local') return;
-
-      if (Object.prototype.hasOwnProperty.call(changes, 'poelink_messages')) {
-        const nextMessages = changes.poelink_messages?.newValue as Message[] | undefined;
-        if (Array.isArray(nextMessages)) setMessages(nextMessages);
-        else if (nextMessages == null) setMessages([]);
-      }
-
-      if (Object.prototype.hasOwnProperty.call(changes, 'poelink_sessions')) {
-        const nextSessions = changes.poelink_sessions?.newValue as StoredChatSession[] | undefined;
-        if (Array.isArray(nextSessions)) setSessions(nextSessions);
-        else if (nextSessions == null) setSessions([]);
-      }
-
-      if (Object.prototype.hasOwnProperty.call(changes, 'poelink_active_session_id')) {
-        const nextActiveSessionId = changes.poelink_active_session_id?.newValue;
-        if (typeof nextActiveSessionId === 'string') setActiveSessionId(nextActiveSessionId);
-        else if (nextActiveSessionId == null) setActiveSessionId('');
-      }
-    };
-
-    browser.storage.onChanged.addListener(handleStorageChange);
-    return () => browser.storage.onChanged.removeListener(handleStorageChange);
   }, []);
 
   // 保存消息并同步最新会话列表

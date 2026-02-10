@@ -1,3 +1,4 @@
+import { browser } from 'wxt/browser';
 import type { Message } from './types';
 import type { LoggerLike } from './sharedTypes';
 import { handleProxyRequest, handleExternalRequest } from './handlers/requests';

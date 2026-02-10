@@ -17,10 +17,9 @@ import ConfigView from './views/ConfigView';
 import ChatView from './views/ChatView';
 
 import { type AppProps, type AppSettings, type ComponentVersions, type Message, type TimelineItem } from './types';
+import { STREAM_CHUNK_SIZE } from '../../components/popup/MessageBubble';
 
 const log = createLogger('popup');
-
-const STREAM_CHUNK_SIZE = 3;
 const getStreamIntervalMs = (speed: AppSettings['streamSpeed'] | undefined) => {
   if (speed === 'fast') return 10;
   if (speed === 'slow') return 40;
@@ -96,7 +95,7 @@ const MainApp: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
   useThemeSetting(config.app?.theme);
   usePopupSizing({ view });
 
-  // 后端状态：进入聊天页时获取，并订阅 storage 实时更新
+  // 后端状态：进入聊天页时获取，定时轮询状态
   useEffect(() => {
     if (!hasServerConfig()) {
       setBackendOnline(null);
@@ -112,13 +111,9 @@ const MainApp: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
     };
     // 进入聊天页时触发即时检测
     fetchStatus(view === 'chat');
-    const handler = (changes: Record<string, browser.Storage.StorageChange>, areaName: string) => {
-      if (areaName !== 'local' || !changes.poelink_backend_status) return;
-      const next = changes.poelink_backend_status.newValue as { online?: boolean } | undefined;
-      setBackendOnline(next?.online ?? null);
-    };
-    browser.storage.onChanged.addListener(handler);
-    return () => browser.storage.onChanged.removeListener(handler);
+    // 定时轮询后端状态（数据在 SQLite，不再使用 browser.storage 监听）
+    const intervalId = setInterval(() => fetchStatus(false), 5000);
+    return () => clearInterval(intervalId);
   }, [hasServerConfig, config.server?.host, config.server?.port, view]);
 
   const notifyUser = useCallback((message: string, _type: 'success' | 'error' | 'info' = 'info') => {
@@ -317,7 +312,7 @@ const MainApp: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
         result.success ? t('connectSuccess') : `${t('connectFailed')}: ${result.error || t('unknown')}`
       );
     } catch (e: any) {
-      setServerTestStatus(`${t('connectError')}: ${getFriendlyErrorMessage(e)}`);
+      setServerTestStatus(`${t('connectError')}: ${getFriendlyErrorMessage(e, t)}`);
     }
   }, [config.server, t]);
 
@@ -331,7 +326,7 @@ const MainApp: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
       });
       setDbTestStatus((res as any).success ? t('connectSuccess') : `${t('connectFailed')}: ${(res as any).message || t('unknown')}`);
     } catch (e: any) {
-      setDbTestStatus(`${t('connectError')}: ${getFriendlyErrorMessage(e)}`);
+      setDbTestStatus(`${t('connectError')}: ${getFriendlyErrorMessage(e, t)}`);
     }
   }, [config.database, t]);
 
@@ -350,7 +345,7 @@ const MainApp: React.FC<AppProps> = ({ onClose, showCloseInHeader = true }) => {
       const msg = (res as any)?.message || (res as any)?.error;
       setOpsTestStatus(ok ? t('connectSuccess') : `${t('connectFailed')}: ${msg || t('unknown')}`);
     } catch (e: any) {
-      setOpsTestStatus(`${t('connectError')}: ${getFriendlyErrorMessage(e)}`);
+      setOpsTestStatus(`${t('connectError')}: ${getFriendlyErrorMessage(e, t)}`);
     }
   }, [config.ops, t]);
 
